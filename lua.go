@@ -22,12 +22,18 @@ import (
 )
 
 type (
-    GoFunction func(L *State) int
-    State      struct {
+    GoFunction        func(L *State) int
+    GoFunctionContext struct {
+        L    *State
+        fun  GoFunction
+        snd  interface{}
+        name string
+    }
+    State struct {
         s          *C.lua_State
         registryId uint32
         registerM  sync.Mutex
-        registry   map[uint32]interface{}
+        registry   map[uint32]interface{} // go object registry to uint32
     }
     Error struct {
         code       int
@@ -51,21 +57,11 @@ var (
     goStatesMutex sync.Mutex
 )
 
-func NewState() *State {
-    ls := (C.luaL_newstate())
-    if ls == nil {
-        return nil
-    }
-    L := newState(ls)
-    return L
-}
-
 func newState(L *C.lua_State) *State {
     st := &State{
         s:          L,
         registryId: 0,
         registry:   make(map[uint32]interface{}),
-        //registrySet: make(map[interface{}]uint32),
     }
     registerGoState(st)
     C.c_initstate(st.s)
@@ -74,13 +70,11 @@ func newState(L *C.lua_State) *State {
 func init() {
     goStates = make(map[interface{}]*State, 16)
 }
-
 func registerGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
     goStates[L.s] = L
 }
-
 func unregisterGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
@@ -91,17 +85,30 @@ func getGoState(L *C.lua_State) *State {
     defer goStatesMutex.Unlock()
     return goStates[L]
 }
-func (L *State) DoFile(filename string) error {
-   if r := L.LoadFile(filename); r != 0 {
-       return &Error{}
-   }
-   return L.Call(0, LUA_MULTRET)
-}
 
+// Lua State
+func NewState() *State {
+    ls := (C.luaL_newstate())
+    if ls == nil {
+        return nil
+    }
+    L := newState(ls)
+    return L
+}
+func (L *State) Close() {
+    C.lua_close(L.s)
+    unregisterGoState(L)
+}
+func (L *State) DoFile(filename string) error {
+    if r := L.LoadFile(filename); r != 0 {
+        return &Error{}
+    }
+    return L.Call(0, LUA_MULTRET)
+}
 func (L *State) LoadFile(filename string) int {
-   Cfilename := C.CString(filename)
-   defer C.free(unsafe.Pointer(Cfilename))
-   return int(C.luaL_loadfilex(L.s, Cfilename, nil))
+    Cfilename := C.CString(filename)
+    defer C.free(unsafe.Pointer(Cfilename))
+    return int(C.luaL_loadfilex(L.s, Cfilename, nil))
 }
 func (L *State) Type(idx int) int {
     return int(C.lua_type(L.s, C.int(idx)))
@@ -126,7 +133,6 @@ func (L *State) Call(nargs int, nresults int) (err error) {
     }
     return nil
 }
-
 func (L *State) DoString(str string) error {
     if r := L.LoadString(str); r != 0 {
         return &Error{
@@ -137,14 +143,12 @@ func (L *State) DoString(str string) error {
     }
     return L.Call(0, 0)
 }
-
 func (L *State) LoadString(str string) int {
     Cs := C.CString(str)
     defer C.free(unsafe.Pointer(Cs))
     return int(C.luaL_loadstring(L.s, Cs))
 }
 func (L *State) GetTop() int { return int(C.lua_gettop(L.s)) }
-
 func (L *State) StackTrace() []StackEntry {
     r := []StackEntry{}
     var d C.lua_Debug
@@ -168,10 +172,55 @@ func (L *State) StackTrace() []StackEntry {
 
     return r
 }
-
 func (L *State) OpenLibs() {
     C.luaL_openlibs(L.s)
 }
+func (L *State) register(f interface{}) uint32 {
+    L.registerM.Lock()
+    defer L.registerM.Unlock()
+    id := atomic.AddUint32(&L.registryId, 1)
+
+    L.registry[id] = f
+    return id
+}
+func (L *State) getRegister(id uint32) interface{} {
+    L.registerM.Lock()
+    defer L.registerM.Unlock()
+    if p, ok := L.registry[id]; ok {
+        return p
+    }
+    return nil
+}
+func (L *State) delRegister(id uint32) interface{} {
+    L.registerM.Lock()
+    defer L.registerM.Unlock()
+    if p, ok := L.registry[id]; ok {
+        delete(L.registry, id)
+        return p
+    }
+    return nil
+}
+// Is
+func (L *State) IsGoFunction(index int) bool {
+    return C.c_is_gostruct(L.s, C.int(index)) != 0
+}
+func (L *State) IsGoStruct(index int) bool {
+    return C.c_is_gostruct(L.s, C.int(index)) != 0
+}
+func (L *State) IsBoolean(index int) bool {
+    return int(C.lua_type(L.s, C.int(index))) == LUA_TBOOLEAN
+}
+func (L *State) IsLightUserdata(index int) bool {
+    return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA
+}
+func (L *State) IsNil(index int) bool       { return int(C.lua_type(L.s, C.int(index))) == LUA_TNIL }
+func (L *State) IsNone(index int) bool      { return int(C.lua_type(L.s, C.int(index))) == LUA_TNONE }
+func (L *State) IsNoneOrNil(index int) bool { return int(C.lua_type(L.s, C.int(index))) <= 0 }
+func (L *State) IsNumber(index int) bool    { return C.lua_isnumber(L.s, C.int(index)) == 1 }
+func (L *State) IsString(index int) bool    { return C.lua_isstring(L.s, C.int(index)) == 1 }
+func (L *State) IsTable(index int) bool     { return int(C.lua_type(L.s, C.int(index))) == LUA_TTABLE }
+func (L *State) IsThread(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TTHREAD }
+func (L *State) IsUserdata(index int) bool  { return C.lua_isuserdata(L.s, C.int(index)) == 1 }
 
 // TO
 func (L *State) ToString(index int) string {
@@ -190,18 +239,32 @@ func (L *State) ToInteger(index int) int {
 func (L *State) ToNumber(index int) float64 {
     return float64(C.lua_tonumberx(L.s, C.int(index), nil))
 }
+func (L *State) ToGoFunction(index int) (f GoFunction) {
+    if !L.IsGoFunction(index) {
+        return nil
+    }
+    fid := uint32(C.c_togofunction(L.s, C.int(index)))
+    if fid < 0 {
+        return nil
+    }
+    ptr := L.getRegister(fid)
+    if fn, ok := ptr.(GoFunction); ok {
+        return fn
+    }
+    return nil
+}
+func (L *State) ToGoStruct(index int) (f interface{}) {
+    if !L.IsGoStruct(index) {
+        return nil
+    }
+    fid := uint32(C.c_togostruct(L.s, C.int(index)))
+    if fid < 0 {
+        return nil
+    }
+    return L.registry[fid]
+}
 
-//
-func (L *State) GetGlobal(name string) {
-    CName := C.CString(name)
-    defer C.free(unsafe.Pointer(CName))
-    C.lua_getglobal(L.s, CName)
-}
-func (L *State) SetGlobal(name string) {
-    Cname := C.CString(name)
-    defer C.free(unsafe.Pointer(Cname))
-    C.lua_setglobal(L.s, Cname)
-}
+// Push
 func (L *State) PushString(str string) {
     Cstr := C.CString(str)
     defer C.free(unsafe.Pointer(Cstr))
@@ -222,6 +285,48 @@ func (L *State) PushNumber(n float64) {
 func (L *State) PushValue(index int) {
     C.lua_pushvalue(L.s, C.int(index))
 }
+func (L *State) PushGoFunction(f GoFunction) {
+    id := L.register(f)
+    C.c_pushgofunction(L.s, C.uint(id))
+}
+func (L *State) PushGoStruct(p interface{}) {
+    id := L.register(p)
+    C.c_pushgostruct(L.s, C.uint(id))
+}
+func (L *State) PushBoolean(b bool) {
+    var bint int
+    if b {
+        bint = 1
+    } else {
+        bint = 0
+    }
+    C.lua_pushboolean(L.s, C.int(bint))
+}
+func (L *State) PushLightUserdata(ud *interface{}) {
+    //push
+    C.lua_pushlightuserdata(L.s, unsafe.Pointer(ud))
+}
+func (L *State) PushGoClosure(f GoFunction) {
+    L.PushGoFunction(f)
+    C.c_pushcallback(L.s)
+}
+
+// Global
+func (L *State) RegisterFunction(name string, f GoFunction) {
+    L.PushGoFunction(f)
+    L.SetGlobal(name)
+}
+func (L *State) GC(what, data int) int { return int(C.lua_gc(L.s, C.int(what), C.int(data))) }
+func (L *State) GetGlobal(name string) {
+    CName := C.CString(name)
+    defer C.free(unsafe.Pointer(CName))
+    C.lua_getglobal(L.s, CName)
+}
+func (L *State) SetGlobal(name string) {
+    Cname := C.CString(name)
+    defer C.free(unsafe.Pointer(Cname))
+    C.lua_setglobal(L.s, Cname)
+}
 func (L *State) RawGet(index int) {
     C.lua_rawget(L.s, C.int(index))
 }
@@ -234,60 +339,19 @@ func (L *State) RawSet(index int) {
 func (L *State) RawSeti(index int, n int) {
     C.lua_rawseti(L.s, C.int(index), C.longlong(n))
 }
-func (L *State) RegisterFunction(name string, f GoFunction) {
-    L.PushGoFunction(f)
-    L.SetGlobal(name)
-}
 
-func (L *State) PushGoFunction(f GoFunction) {
-    id := L.register(f)
-    C.c_pushgofunction(L.s, C.uint(id))
-}
-func (L *State) PushGoStruct(p interface{}) {
-    id := L.register(p)
-    C.c_pushgostruct(L.s, C.uint(id))
-}
-func (L *State) register(f interface{}) uint32 {
-    L.registerM.Lock()
-    defer L.registerM.Unlock()
-
-    id := atomic.AddUint32(&L.registryId, 1)
-    L.registry[id] = f
-    return id
-
-}
-func (L *State) getRegister(id uint32) interface{} {
-    L.registerM.Lock()
-    defer L.registerM.Unlock()
-    if p, ok := L.registry[id]; ok {
-        return p
-    }
-    return nil
-}
-func (L *State) delRegister(id uint32) interface{} {
-    L.registerM.Lock()
-    defer L.registerM.Unlock()
-    if p, ok := L.registry[id]; ok {
-        delete(L.registry, id)
-        //delete(L.registrySet, p)
-        return p
-    }
-    return nil
-}
-func (L *State) PushBoolean(b bool) {
-    var bint int
-    if b {
-        bint = 1
-    } else {
-        bint = 0
-    }
-    C.lua_pushboolean(L.s, C.int(bint))
-}
+// Table
 func (L *State) NewTable() {
     C.lua_createtable(L.s, 0, 0)
 }
-//export g_callgofunction
-func g_callgofunction(L *C.lua_State, fid uint32) int {
+func (L *State) GetField(index int, k string) {
+    Ck := C.CString(k)
+    defer C.free(unsafe.Pointer(Ck))
+    C.lua_getfield(L.s, C.int(index), Ck)
+}
+
+//export g_gofunction
+func g_gofunction(L *C.lua_State, fid uint32) int {
     L1 := getGoState(L)
     if fid < 0 {
         return 0
@@ -303,8 +367,8 @@ func g_callgofunction(L *C.lua_State, fid uint32) int {
     return fn(L1)
 }
 
-//export g_callgogc
-func g_callgogc(L *C.lua_State, fid uint32) int {
+//export g_gogc
+func g_gogc(L *C.lua_State, fid uint32) int {
     L1 := getGoState(L)
     if fid < 0 {
         return 0
@@ -354,20 +418,16 @@ func g_getfield(L *C.lua_State, fid uint32, fieldName *C.char) int {
         fval = reflect.ValueOf(obj).MethodByName(name)
         if fval.Kind() == reflect.Func {
             // 生成一个函数
-            // TODO 应该在全局缓存
-            fn := makeFunc(fval)
-            L1.PushGoFunction(fn)
+            L1.PushGoFunction(L1.makeFunc(obj, name, fval))
+            //f := GoFunctionContext{}
             return 1
         }
-
         return 0
     }
 }
-
-func makeFunc(value reflect.Value) GoFunction {
+func (L *State) makeFunc(sender interface{}, methodName string, value reflect.Value) GoFunction {
     return func(L *State) int {
         t := value.Type()
-
         var (
             inArgs  []reflect.Value
             outArgs []reflect.Value
@@ -375,28 +435,38 @@ func makeFunc(value reflect.Value) GoFunction {
 
         for i := 0; i < t.NumIn(); i++ {
             idx := i + 2
-            luatype := int(C.lua_type(L.s, C.int(idx)))
-            switch t.In(i).Kind() {
+            luatype := L.Type(idx)
+            k := t.In(i).Kind()
+            switch k {
             case reflect.String:
                 if luatype != LUA_TSTRING {
-                    log.Println("参数错误")
                     return 0
                 }
                 inArgs = append(inArgs, reflect.ValueOf(L.ToString(idx)))
             case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
                 if luatype != LUA_TNUMBER {
-                    log.Println("参数错误")
                     return 0
                 }
                 inArgs = append(inArgs, reflect.ValueOf(L.ToInteger(idx)))
+            case reflect.Interface:
+                if luatype != LUA_TUSERDATA {
+                    return 0
+                }
+                inArgs = append(inArgs, reflect.ValueOf(L.ToGoStruct(idx)))
+            case reflect.Ptr:
+                inArgs = append(inArgs, reflect.ValueOf(L.ToGoStruct(idx)))
+            default:
+                log.Println("参数不支持", k)
+                return 0
             }
         }
 
         // 输入参数完备
-        outArgs = value.Call(inArgs)
+        outArgs = reflect.ValueOf(sender).MethodByName(methodName).Call(inArgs)
+        //outArgs = value.Call(inArgs)
         n := 0
         //
-        for _, fval := range outArgs {
+        for i, fval := range outArgs {
             switch fval.Kind() {
             case reflect.Bool:
                 L.PushBoolean(fval.Bool())
@@ -416,6 +486,11 @@ func makeFunc(value reflect.Value) GoFunction {
             case reflect.Slice:
                 L.PushBytes(fval.Bytes())
                 n++
+            case reflect.Interface:
+                L.PushGoStruct(fval.Interface())
+                n++
+            default:
+                log.Printf("第%d个返回值不支持(%v)", i, fval.Kind())
             }
         }
         return n
@@ -482,4 +557,9 @@ func g_setfield(L *C.lua_State, fid uint32, fieldName *C.char) int {
     default:
         return 0
     }
+}
+
+// GoFunctionContext
+func (f *GoFunctionContext) Invoke() {
+
 }

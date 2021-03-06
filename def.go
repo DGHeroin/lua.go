@@ -9,6 +9,7 @@ const (
 )
 
 const (
+    LUA_TNONE          = int(C.LUA_TNONE)
     LUA_TNIL           = int(C.LUA_TNIL)
     LUA_TNUMBER        = int(C.LUA_TNUMBER)
     LUA_TBOOLEAN       = int(C.LUA_TBOOLEAN)

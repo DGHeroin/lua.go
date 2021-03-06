@@ -2,33 +2,34 @@
 
 #define MT_GOFUNCTION "Lua.GoFunction"
 #define MT_GOINTERFACE "Lua.GoInterface"
-unsigned int* clua_checkgosomething(lua_State* L, int index, const char *desired_metatable);
-extern int g_callgofunction(lua_State* L, unsigned int fid);
-extern int g_callgogc(lua_State* L, unsigned int fid);
+
+extern int g_gofunction(lua_State* L, unsigned int fid);
+extern int g_gogc(lua_State* L, unsigned int fid);
 extern int g_getfield(lua_State* L, unsigned int fid, const char* fieldName);
 extern int g_setfield(lua_State* L, unsigned int fid, const char* fieldName);
-int gchook_gofunction(lua_State* L);
-int gchook_gointerface(lua_State* L);
 
-int interface_index_callback(lua_State* L);
-int interface_newindex_callback(lua_State* L);
+static int callback_function(lua_State* L);
+static int gchook_gofunction(lua_State* L);
+
+static int interface_index_callback(lua_State* L);
+static int interface_newindex_callback(lua_State* L);
+static int gchook_gointerface(lua_State* L);
 
 void c_initstate(lua_State* L) {
-    // 函数
+    // GOFunction
     {
-            luaL_newmetatable(L, MT_GOFUNCTION);
+        luaL_newmetatable(L, MT_GOFUNCTION);
 
-            lua_pushliteral(L,"__gc");
-            lua_pushcfunction(L,&gchook_gofunction);
-            lua_settable(L,-3);
+        lua_pushliteral(L,"__gc");
+        lua_pushcfunction(L,&gchook_gofunction);
+        lua_settable(L,-3);
 
-            lua_pushliteral(L,"__call");
-            lua_pushcfunction(L,&callback_function);
-            lua_settable(L,-3);
+        lua_pushliteral(L,"__call");
+        lua_pushcfunction(L,&callback_function);
+        lua_settable(L,-3);
 
-            lua_pop(L,1);
+        lua_pop(L,1);
     }
-
 
     // go struct
     {
@@ -61,8 +62,7 @@ void c_pushgostruct(lua_State* L, unsigned int fid) {
     luaL_getmetatable(L, MT_GOINTERFACE);
     lua_setmetatable(L, -2);
 }
-
-unsigned int* check_go_ref_id(lua_State* L, int index, const char*mt) {
+unsigned int* check_go_ref(lua_State* L, int index, const char*mt) {
     void *p = lua_touserdata(L, index);
     if (p == NULL) { return 0; }
     if (lua_getmetatable(L, index)) {
@@ -72,27 +72,25 @@ unsigned int* check_go_ref_id(lua_State* L, int index, const char*mt) {
     }
     return p;
 }
-
-int callback_function(lua_State* L) {
-    unsigned int* fidptr = check_go_ref_id(L, 1, MT_GOFUNCTION);
-
+static int callback_function(lua_State* L) {
+    unsigned int* fidptr = check_go_ref(L, 1, MT_GOFUNCTION);
     if (fidptr == NULL) { return 0; }
-    return g_callgofunction(L, *fidptr);
+    return g_gofunction(L, *fidptr);
 }
-int gchook_gofunction(lua_State* L) {
-    unsigned int* fidptr = check_go_ref_id(L, -1, MT_GOFUNCTION);
+static int gchook_gofunction(lua_State* L) {
+    unsigned int* fidptr = check_go_ref(L, -1, MT_GOFUNCTION);
     if (fidptr == NULL) { return 0; }
-    g_callgogc(L, *fidptr);
+    g_gogc(L, *fidptr);
     return 0;
 }
-int gchook_gointerface(lua_State* L) {
-    unsigned int* fidptr = check_go_ref_id(L, -1, MT_GOINTERFACE);
+static int gchook_gointerface(lua_State* L) {
+    unsigned int* fidptr = check_go_ref(L, -1, MT_GOINTERFACE);
     if (fidptr == NULL) { return 0; }
-    g_callgogc(L, *fidptr);
+    g_gogc(L, *fidptr);
     return 0;
 }
-int interface_index_callback(lua_State* L) {
-    unsigned int* fidptr = check_go_ref_id(L, 1, MT_GOINTERFACE);
+static int interface_index_callback(lua_State* L) {
+    unsigned int* fidptr = check_go_ref(L, 1, MT_GOINTERFACE);
     if (fidptr == NULL) { return 0; }
 
     char *field_name = (char *)lua_tostring(L, 2);
@@ -102,9 +100,8 @@ int interface_index_callback(lua_State* L) {
     }
     return g_getfield(L, *fidptr, field_name);
 }
-
-int interface_newindex_callback(lua_State* L) {
-    unsigned int* fidptr = check_go_ref_id(L, 1, MT_GOINTERFACE);
+static int interface_newindex_callback(lua_State* L) {
+    unsigned int* fidptr = check_go_ref(L, 1, MT_GOINTERFACE);
     if (fidptr == NULL) { return 0; }
     char *field_name = (char *)lua_tostring(L, 2);
     if (field_name == NULL) {
@@ -112,4 +109,25 @@ int interface_newindex_callback(lua_State* L) {
         return 1;
     }
     return g_setfield(L, *fidptr, field_name);
+}
+int c_is_gofunction(lua_State *L, int n) {
+    return check_go_ref(L, n, MT_GOFUNCTION) != NULL;
+}
+int c_is_gostruct(lua_State *L, int n) {
+    return check_go_ref(L, n, MT_GOINTERFACE) != NULL;
+}
+unsigned int c_togofunction(lua_State* L, int index) {
+    unsigned int *r = check_go_ref(L, index, MT_GOFUNCTION);
+    return (r != NULL) ? *r : -1;
+}
+unsigned int c_togostruct(lua_State *L, int index) {
+    unsigned int *r = check_go_ref(L, index, MT_GOINTERFACE);
+    return (r != NULL) ? *r : -1;
+}
+static int callback_c (lua_State* L) {
+    int fid = c_togofunction(L, lua_upvalueindex(1));
+    return g_gofunction(L, fid);
+}
+void c_pushcallback(lua_State* L) {
+    lua_pushcclosure(L, callback_c, 1);
 }
