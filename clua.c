@@ -131,3 +131,9 @@ static int callback_c (lua_State* L) {
 void c_pushcallback(lua_State* L) {
     lua_pushcclosure(L, callback_c, 1);
 }
+
+void c_register_lib(lua_State* L, void* fn, const char* name) {
+    lua_CFunction func = (lua_CFunction) fn;
+    luaL_requiref(L, name, func, 1);
+    lua_pop(L, 1);
+}

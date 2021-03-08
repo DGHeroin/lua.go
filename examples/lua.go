@@ -26,8 +26,9 @@ func (d *Dog) Tell(p *Dog) interface{} {
 }
 func main() {
     log.SetFlags(log.LstdFlags | log.Llongfile)
-    L := lua.NewState()
+    L := lua.NewState(nil)
     L.OpenLibs()
+    L.OpenLibsExt()
 
     L.RegisterFunction("GGFunc", func(L *lua.State) int {
        log.Println("call GG.......")

@@ -34,6 +34,7 @@ type (
         registryId uint32
         registerM  sync.Mutex
         registry   map[uint32]interface{} // go object registry to uint32
+        call       chan func()
     }
     Error struct {
         code       int
@@ -57,18 +58,20 @@ var (
     goStatesMutex sync.Mutex
 )
 
+func init() {
+    goStates = make(map[interface{}]*State, 16)
+}
 func newState(L *C.lua_State) *State {
     st := &State{
         s:          L,
         registryId: 0,
         registry:   make(map[uint32]interface{}),
+        call:       make(chan func()),
     }
     registerGoState(st)
     C.c_initstate(st.s)
+    go st.callbackHandle()
     return st
-}
-func init() {
-    goStates = make(map[interface{}]*State, 16)
 }
 func registerGoState(L *State) {
     goStatesMutex.Lock()
@@ -87,13 +90,14 @@ func getGoState(L *C.lua_State) *State {
 }
 
 // Lua State
-func NewState() *State {
-    ls := (C.luaL_newstate())
-    if ls == nil {
-        return nil
+func NewState(L *C.lua_State) *State {
+    if L == nil {
+        L = (C.luaL_newstate())
+        if L == nil {
+            return nil
+        }
     }
-    L := newState(ls)
-    return L
+    return newState(L)
 }
 func (L *State) Close() {
     C.lua_close(L.s)
@@ -179,6 +183,9 @@ func (L *State) register(f interface{}) uint32 {
     L.registerM.Lock()
     defer L.registerM.Unlock()
     id := atomic.AddUint32(&L.registryId, 1)
+    if id == 0 { // 完成一次uint32
+        id = atomic.AddUint32(&L.registryId, 1)
+    }
 
     L.registry[id] = f
     return id
@@ -200,16 +207,43 @@ func (L *State) delRegister(id uint32) interface{} {
     }
     return nil
 }
+func (L *State) callbackHandle() {
+    invoke := func(cb func()) {
+        defer func() {
+            recover()
+        }()
+        cb()
+    }
+    for {
+        select {
+        case cb := <-L.call:
+            if cb != nil {
+                invoke(cb)
+            }
+        }
+    }
+}
+func (L *State) Run(cb func()) {
+    defer func() {
+        recover()
+    }()
+    L.call <- cb
+}
+func (L *State) registerLib(name string, fn unsafe.Pointer) {
+    Sln := C.CString(name)
+    defer C.free(unsafe.Pointer(Sln))
+    C.c_register_lib(L.s, fn, Sln)
+}
+func (L *State) OpenLibsExt() {
+    L.registerLib("serialize", C.luaopen_serialize)
+    L.registerLib("cmsgpack", C.luaopen_cmsgpack)
+    L.registerLib("pb", C.luaopen_pb)
+}
+
 // Is
-func (L *State) IsGoFunction(index int) bool {
-    return C.c_is_gostruct(L.s, C.int(index)) != 0
-}
-func (L *State) IsGoStruct(index int) bool {
-    return C.c_is_gostruct(L.s, C.int(index)) != 0
-}
-func (L *State) IsBoolean(index int) bool {
-    return int(C.lua_type(L.s, C.int(index))) == LUA_TBOOLEAN
-}
+func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
+func (L *State) IsGoStruct(index int) bool   { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
+func (L *State) IsBoolean(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TBOOLEAN }
 func (L *State) IsLightUserdata(index int) bool {
     return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA
 }
@@ -221,6 +255,9 @@ func (L *State) IsString(index int) bool    { return C.lua_isstring(L.s, C.int(i
 func (L *State) IsTable(index int) bool     { return int(C.lua_type(L.s, C.int(index))) == LUA_TTABLE }
 func (L *State) IsThread(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TTHREAD }
 func (L *State) IsUserdata(index int) bool  { return C.lua_isuserdata(L.s, C.int(index)) == 1 }
+func (L *State) IsLuaFunction(index int) bool {
+    return int(C.lua_type(L.s, C.int(index))) == LUA_TFUNCTION
+}
 
 // TO
 func (L *State) ToString(index int) string {
