@@ -239,7 +239,21 @@ func (L *State) OpenLibsExt() {
     L.registerLib("cmsgpack", C.luaopen_cmsgpack)
     L.registerLib("pb", C.luaopen_pb)
 }
-
+func (L *State) Ref(t int) int {
+    return int(C.luaL_ref(L.s, C.int(t)))
+}
+func (L *State) Unref(t int, ref int) {
+    C.luaL_unref(L.s, C.int(t), C.int(ref))
+}
+func (L *State) RefRegistryIndex() int {
+    return L.Ref(C.LUA_REGISTRYINDEX)
+}
+func (L *State) UnrefRegistryIndex(ref int) {
+    L.Unref(C.LUA_REGISTRYINDEX, ref)
+}
+func (L*State) RawGetiRegistryIndex(ref int)  {
+    L.RawGeti(C.LUA_REGISTRYINDEX, ref)
+}
 // Is
 func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsGoStruct(index int) bool   { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
@@ -458,13 +472,13 @@ func g_getfield(L *C.lua_State, fid uint32, fieldName *C.char) int {
         fval = reflect.ValueOf(obj).MethodByName(name)
         if fval.Kind() == reflect.Func {
             // 生成一个函数
-            L1.PushGoFunction(L1.makeFunc(fval))
+            L1.PushGoFunction(L1.makeFunc(obj, name, fval))
             return 1
         }
         return 0
     }
 }
-func (L *State) makeFunc(value reflect.Value) GoFunction {
+func (L *State) makeFunc(sender interface{}, funcName string, value reflect.Value) GoFunction {
     return func(L *State) int {
         t := value.Type()
         var (
@@ -476,6 +490,7 @@ func (L *State) makeFunc(value reflect.Value) GoFunction {
             idx := i + 2
             luatype := L.Type(idx)
             k := t.In(i).Kind()
+
             switch k {
             case reflect.Bool:
                 if luatype != LUA_TNUMBER {
@@ -488,15 +503,18 @@ func (L *State) makeFunc(value reflect.Value) GoFunction {
                 }
                 inArgs = append(inArgs, reflect.ValueOf(L.ToString(idx)))
             case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-                if luatype != LUA_TNUMBER {
-                    return 0
+                if luatype == LUA_TNUMBER {
+                    inArgs = append(inArgs, reflect.ValueOf(L.ToInteger(idx)))
+                } else if luatype == LUA_TFUNCTION {
+                    ref := L.RefRegistryIndex()
+                    inArgs = append(inArgs, reflect.ValueOf(ref))
                 }
-                inArgs = append(inArgs, reflect.ValueOf(L.ToInteger(idx)))
             case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-                if luatype != LUA_TNUMBER {
+                if luatype == LUA_TNUMBER {
+                    inArgs = append(inArgs, reflect.ValueOf(uint64(L.ToInteger(idx))))
+                } else {
                     return 0
                 }
-                inArgs = append(inArgs, reflect.ValueOf(uint64(L.ToInteger(idx))))
             case reflect.Float32, reflect.Float64:
                 if luatype != LUA_TNUMBER {
                     return 0
