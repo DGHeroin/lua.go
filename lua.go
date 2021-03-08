@@ -260,6 +260,9 @@ func (L *State) IsLuaFunction(index int) bool {
 }
 
 // TO
+func (L *State) ToBoolean(index int) bool {
+    return int(C.lua_tointegerx(L.s, C.int(index), nil)) == 1
+}
 func (L *State) ToString(index int) string {
     var size C.size_t
     r := C.lua_tolstring(L.s, C.int(index), &size)
@@ -455,14 +458,13 @@ func g_getfield(L *C.lua_State, fid uint32, fieldName *C.char) int {
         fval = reflect.ValueOf(obj).MethodByName(name)
         if fval.Kind() == reflect.Func {
             // 生成一个函数
-            L1.PushGoFunction(L1.makeFunc(obj, name, fval))
-            //f := GoFunctionContext{}
+            L1.PushGoFunction(L1.makeFunc(fval))
             return 1
         }
         return 0
     }
 }
-func (L *State) makeFunc(sender interface{}, methodName string, value reflect.Value) GoFunction {
+func (L *State) makeFunc(value reflect.Value) GoFunction {
     return func(L *State) int {
         t := value.Type()
         var (
@@ -475,6 +477,11 @@ func (L *State) makeFunc(sender interface{}, methodName string, value reflect.Va
             luatype := L.Type(idx)
             k := t.In(i).Kind()
             switch k {
+            case reflect.Bool:
+                if luatype != LUA_TNUMBER {
+                    return 0
+                }
+                inArgs = append(inArgs, reflect.ValueOf(bool(L.ToInteger(idx) == 1)))
             case reflect.String:
                 if luatype != LUA_TSTRING {
                     return 0
@@ -485,6 +492,16 @@ func (L *State) makeFunc(sender interface{}, methodName string, value reflect.Va
                     return 0
                 }
                 inArgs = append(inArgs, reflect.ValueOf(L.ToInteger(idx)))
+            case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+                if luatype != LUA_TNUMBER {
+                    return 0
+                }
+                inArgs = append(inArgs, reflect.ValueOf(uint64(L.ToInteger(idx))))
+            case reflect.Float32, reflect.Float64:
+                if luatype != LUA_TNUMBER {
+                    return 0
+                }
+                inArgs = append(inArgs, reflect.ValueOf(L.ToNumber(idx)))
             case reflect.Interface:
                 if luatype != LUA_TUSERDATA {
                     return 0
@@ -492,6 +509,11 @@ func (L *State) makeFunc(sender interface{}, methodName string, value reflect.Va
                 inArgs = append(inArgs, reflect.ValueOf(L.ToGoStruct(idx)))
             case reflect.Ptr:
                 inArgs = append(inArgs, reflect.ValueOf(L.ToGoStruct(idx)))
+            case reflect.Slice:
+                if luatype != LUA_TSTRING {
+                    return 0
+                }
+                inArgs = append(inArgs, reflect.ValueOf(L.ToBytes(idx)))
             default:
                 log.Println("参数不支持", k)
                 return 0
@@ -499,8 +521,7 @@ func (L *State) makeFunc(sender interface{}, methodName string, value reflect.Va
         }
 
         // 输入参数完备
-        outArgs = reflect.ValueOf(sender).MethodByName(methodName).Call(inArgs)
-        //outArgs = value.Call(inArgs)
+        outArgs = value.Call(inArgs)
         n := 0
         //
         for i, fval := range outArgs {
