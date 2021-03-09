@@ -563,7 +563,18 @@ func (L *State) makeFunc(sender interface{}, funcName string, value reflect.Valu
                 L.PushBytes(fval.Bytes())
                 n++
             case reflect.Interface:
-                L.PushGoStruct(fval.Interface())
+                if fval.Interface() == nil {
+                    L.PushNil()
+                } else {
+                    L.PushGoStruct(fval.Interface())
+                }
+                n++
+            case reflect.Ptr:
+                if fval.Interface() == nil {
+                    L.PushNil()
+                } else {
+                    L.PushGoStruct(fval.Interface())
+                }
                 n++
             default:
                 log.Printf("第%d个返回值不支持(%v)", i, fval.Kind())
