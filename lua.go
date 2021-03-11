@@ -56,10 +56,12 @@ func (e *Error) Error() string {
 var (
     goStates      map[interface{}]*State
     goStatesMutex sync.Mutex
+    namedStates   map[string]*State
 )
 
 func init() {
     goStates = make(map[interface{}]*State, 16)
+    namedStates = make(map[string]*State, 16)
 }
 func newState(L *C.lua_State) *State {
     st := &State{
@@ -71,6 +73,9 @@ func newState(L *C.lua_State) *State {
     registerGoState(st)
     C.c_initstate(st.s)
     go st.callbackHandle()
+
+    st.PushGoStruct(st)
+    st.SetGlobal("_LuaState")
     return st
 }
 func registerGoState(L *State) {
@@ -86,7 +91,19 @@ func unregisterGoState(L *State) {
 func getGoState(L *C.lua_State) *State {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
-    return goStates[L]
+    st, _ := goStates[L]
+    return st
+}
+func getNamedState(name string) *State {
+    goStatesMutex.Lock()
+    defer goStatesMutex.Unlock()
+    st, _ := namedStates[name]
+    return st
+}
+func setNamedState(name string, L *State) {
+    goStatesMutex.Lock()
+    defer goStatesMutex.Unlock()
+    namedStates[name] = L
 }
 
 // Lua State
@@ -116,6 +133,12 @@ func (L *State) LoadFile(filename string) int {
 }
 func (L *State) Type(idx int) int {
     return int(C.lua_type(L.s, C.int(idx)))
+}
+func (L *State) Typename(typeId int) string {
+    return C.GoString(C.lua_typename(L.s, C.int(typeId)))
+}
+func (L *State) TypenameX(idx int) string {
+    return L.Typename(L.Type(idx))
 }
 func (L *State) Call(nargs int, nresults int) (err error) {
     defer func() {
@@ -245,14 +268,41 @@ func (L *State) Ref(t int) int {
 func (L *State) Unref(t int, ref int) {
     C.luaL_unref(L.s, C.int(t), C.int(ref))
 }
-func (L *State) RefRegistryIndex() int {
+func (L *State) RefX() int {
     return L.Ref(C.LUA_REGISTRYINDEX)
 }
-func (L *State) UnrefRegistryIndex(ref int) {
+func (L *State) UnreX(ref int) {
     L.Unref(C.LUA_REGISTRYINDEX, ref)
 }
-func (L*State) RawGetiRegistryIndex(ref int)  {
+func (L *State) RawGetiX(ref int) {
     L.RawGeti(C.LUA_REGISTRYINDEX, ref)
+}
+func (L *State) New() *State {
+    return NewState(nil)
+}
+func (L *State) SetName(name string) {
+    setNamedState(name, L)
+}
+func (L *State) SendMessage(name string, cmd int, data[]byte)  {
+    go func() {
+        t := getNamedState(name)
+        if t == nil {
+            return
+        }
+        t.Run(func() {
+            t.GetGlobal("_LuaStateMessage")
+            if t.IsLuaFunction(-1) {
+                t.PushInteger(int64(cmd))
+                t.PushBytes(data)
+                if err := t.Call(2, 0); err != nil {
+                    log.Println(err)
+                }
+            } else {
+                log.Println("not func")
+            }
+        })
+    }()
+
 }
 // Is
 func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
@@ -506,7 +556,7 @@ func (L *State) makeFunc(sender interface{}, funcName string, value reflect.Valu
                 if luatype == LUA_TNUMBER {
                     inArgs = append(inArgs, reflect.ValueOf(L.ToInteger(idx)))
                 } else if luatype == LUA_TFUNCTION {
-                    ref := L.RefRegistryIndex()
+                    ref := L.RefX()
                     inArgs = append(inArgs, reflect.ValueOf(ref))
                 }
             case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
