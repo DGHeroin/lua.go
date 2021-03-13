@@ -2,6 +2,7 @@ package main
 
 import (
     "github.com/DGHeroin/lua.go"
+    "log"
     "os"
 )
 
@@ -10,8 +11,8 @@ func main()  {
     L.OpenLibs()
     L.OpenLibsExt()
 
-    L.DoFile(os.Args[1])
-    select {
-
+    if err := L.DoFile(os.Args[1]); err != nil {
+        log.Println(err)
     }
+
 }

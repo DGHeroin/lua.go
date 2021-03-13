@@ -1,4 +1,5 @@
 _LuaState.SetName('main')
+gVar = 'i am main'
 function _LuaStateMessage(cmd, data)
     print('in main', cmd, data)
 end
@@ -12,5 +13,10 @@ b.OpenLibs()
 b.OpenLibsExt()
 b.DoFile('multi_b.lua')
 
+local c = _LuaState.NewThread()
+c.DoFile('multi_c.lua')
+
 _LuaState.SendMessage('a', 1, 'hello')
 _LuaState.SendMessage('b', 2, 'world')
+
+_LuaState.WaitClose()

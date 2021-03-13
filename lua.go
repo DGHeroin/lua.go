@@ -31,10 +31,12 @@ type (
     }
     State struct {
         s          *C.lua_State
+        name       string
         registryId uint32
         registerM  sync.Mutex
         registry   map[uint32]interface{} // go object registry to uint32
         call       chan func()
+        closeCh    chan int
     }
     Error struct {
         code       int
@@ -69,6 +71,7 @@ func newState(L *C.lua_State) *State {
         registryId: 0,
         registry:   make(map[uint32]interface{}),
         call:       make(chan func()),
+        closeCh:    make(chan int),
     }
     registerGoState(st)
     C.c_initstate(st.s)
@@ -119,6 +122,7 @@ func NewState(L *C.lua_State) *State {
 func (L *State) Close() {
     C.lua_close(L.s)
     unregisterGoState(L)
+    close(L.closeCh)
 }
 func (L *State) DoFile(filename string) error {
     if r := L.LoadFile(filename); r != 0 {
@@ -271,7 +275,7 @@ func (L *State) Unref(t int, ref int) {
 func (L *State) RefX() int {
     return L.Ref(C.LUA_REGISTRYINDEX)
 }
-func (L *State) UnreX(ref int) {
+func (L *State) UnrefX(ref int) {
     L.Unref(C.LUA_REGISTRYINDEX, ref)
 }
 func (L *State) RawGetiX(ref int) {
@@ -281,9 +285,13 @@ func (L *State) New() *State {
     return NewState(nil)
 }
 func (L *State) SetName(name string) {
+    L.name = name
     setNamedState(name, L)
 }
-func (L *State) SendMessage(name string, cmd int, data[]byte)  {
+func (L *State) GetName() string {
+    return L.name
+}
+func (L *State) SendMessage(name string, cmd int, data []byte) {
     go func() {
         t := getNamedState(name)
         if t == nil {
@@ -304,6 +312,17 @@ func (L *State) SendMessage(name string, cmd int, data[]byte)  {
     }()
 
 }
+func (L *State) NewThread() *State {
+    nL := C.lua_newthread(L.s)
+    return NewState(nL)
+}
+func (L *State) WaitClose() {
+    defer func() {
+        recover()
+    }()
+    <-L.closeCh
+}
+
 // Is
 func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsGoStruct(index int) bool   { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
