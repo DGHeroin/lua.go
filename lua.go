@@ -472,7 +472,9 @@ func (L *State) GetField(index int, k string) {
     defer C.free(unsafe.Pointer(Ck))
     C.lua_getfield(L.s, C.int(index), Ck)
 }
-
+func (L *State) SetTable(n int) {
+    C.lua_settable(L.s, C.int(n))
+}
 //export g_gofunction
 func g_gofunction(L *C.lua_State, fid uint32) int {
     L1 := getGoState(L)
