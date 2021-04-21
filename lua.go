@@ -11,6 +11,7 @@ package lua
 #include <lauxlib.h>
 #include <lualib.h>
 #include "clua.h"
+
 */
 import "C"
 import (
@@ -462,6 +463,9 @@ func (L *State) RawSet(index int) {
 func (L *State) RawSeti(index int, n int) {
     C.lua_rawseti(L.s, C.int(index), C.longlong(n))
 }
+func (L *State) Pop(index int) {
+    C.lua_settop(L.s, C.int(-index-1))
+}
 
 // Table
 func (L *State) NewTable() {
@@ -475,6 +479,51 @@ func (L *State) GetField(index int, k string) {
 func (L *State) SetTable(n int) {
     C.lua_settable(L.s, C.int(n))
 }
+func (L *State) GetTable(n int) {
+    C.lua_gettable(L.s, C.int(n))
+}
+func (L *State) XGetTableInt(fieldName string) (int64, bool) {
+    Cstr := C.CString(fieldName)
+    defer C.free(unsafe.Pointer(Cstr))
+    defer L.Pop(1)
+    C.lua_pushlstring(L.s, Cstr, C.size_t(len(fieldName)))
+    C.lua_gettable(L.s, C.int(-1))
+    if !L.IsNumber(-1) {
+        return 0, false
+    }
+    {
+        return int64(C.lua_tointegerx(L.s, C.int(-1), nil)), true
+    }
+}
+func (L *State) XGetTableString(fieldName string) (string, bool) {
+    Cstr := C.CString(fieldName)
+    defer C.free(unsafe.Pointer(Cstr))
+    defer L.Pop(1)
+    C.lua_pushlstring(L.s, Cstr, C.size_t(len(fieldName)))
+    C.lua_gettable(L.s, C.int(-1))
+    if !L.IsString(-1) {
+        return "", false
+    }
+    {
+        var size C.size_t
+        r := C.lua_tolstring(L.s, C.int(-1), &size)
+        return C.GoStringN(r, C.int(size)), true
+    }
+}
+func (L *State) XGetTableFloat(fieldName string) (float64, bool) {
+    Cstr := C.CString(fieldName)
+    defer C.free(unsafe.Pointer(Cstr))
+    defer L.Pop(1)
+    C.lua_pushlstring(L.s, Cstr, C.size_t(len(fieldName)))
+    C.lua_gettable(L.s, C.int(-1))
+    if !L.IsNumber(-1) {
+        return 0, false
+    }
+    {
+        return float64(C.lua_tonumberx(L.s, C.int(-1), nil)), true
+    }
+}
+
 //export g_gofunction
 func g_gofunction(L *C.lua_State, fid uint32) int {
     L1 := getGoState(L)
