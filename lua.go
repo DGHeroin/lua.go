@@ -20,8 +20,9 @@ import (
     "sync/atomic"
     "unsafe"
 )
+
 const (
-    LUA_MULTRET       = C.LUA_MULTRET
+    LUA_MULTRET = C.LUA_MULTRET
 )
 
 const (
@@ -52,7 +53,8 @@ type (
         registerM  sync.Mutex
         registry   map[uint32]interface{} // go object registry to uint32
         call       chan func()
-        closeCh    chan int
+        closeChan  chan struct{}
+        closeOnce  sync.Once
     }
     Error struct {
         code       int
@@ -87,7 +89,7 @@ func newState(L *C.lua_State) *State {
         registryId: 0,
         registry:   make(map[uint32]interface{}),
         call:       make(chan func()),
-        closeCh:    make(chan int),
+        closeChan:  make(chan struct{}),
     }
     registerGoState(st)
     C.c_initstate(st.s)
@@ -136,9 +138,14 @@ func NewState(L *C.lua_State) *State {
     return newState(L)
 }
 func (L *State) Close() {
-    C.lua_close(L.s)
-    unregisterGoState(L)
-    close(L.closeCh)
+    L.closeOnce.Do(func() {
+        C.lua_close(L.s)
+        unregisterGoState(L)
+        close(L.closeChan)
+    })
+}
+func (L*State) CloseChan() chan struct{} {
+    return L.closeChan
 }
 func (L *State) DoFile(filename string) error {
     if r := L.LoadFile(filename); r != 0 {
@@ -336,7 +343,9 @@ func (L *State) WaitClose() {
     defer func() {
         recover()
     }()
-    <-L.closeCh
+    select {
+    case <-L.closeChan:
+    }
 }
 
 // Is
@@ -491,6 +500,7 @@ func (L *State) GetField(index int, k string) {
 func (L *State) SetTable(n int) {
     C.lua_settable(L.s, C.int(n))
 }
+
 //export g_gofunction
 func g_gofunction(L *C.lua_State, fid uint32) int {
     L1 := getGoState(L)
