@@ -1,18 +1,16 @@
 package lua
 
 /*
-#cgo CFLAGS: -I ${SRCDIR}/inc
-#cgo CFLAGS: -I ${SRCDIR}/lua
-#cgo windows,!llua LDFLAGS: -L${SRCDIR}/libs/windows -llua -lm -lws2_32
-#cgo linux,!llua LDFLAGS: -L${SRCDIR}/libs/linux -llua -lm
-#cgo darwin,!llua LDFLAGS: -L${SRCDIR}/libs/macos -llua -lm
-
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include "c-lib.h"
 #include "clua.h"
 */
 import "C"
+
 import (
     "log"
     "reflect"
@@ -464,7 +462,10 @@ func (L *State) RegisterFunction(name string, f GoFunction) {
     L.PushGoFunction(f)
     L.SetGlobal(name)
 }
-func (L *State) GC(what, data int) int { return int(C.lua_gc(L.s, C.int(what), C.int(data))) }
+func (L *State) GC(what, data int) int {
+    //return int(C.lua_gc(L.s, C.int(what), C.int(data)))
+    return 0
+}
 func (L *State) GetGlobal(name string) {
     CName := C.CString(name)
     defer C.free(unsafe.Pointer(CName))

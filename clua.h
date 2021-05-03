@@ -1,7 +1,11 @@
 #ifndef _LUA_
 #define _LUA_
 
-#include "inc.h"
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "c-lib.h"
 
 void c_initstate(lua_State* L);
