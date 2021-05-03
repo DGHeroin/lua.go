@@ -11,7 +11,6 @@ package lua
 #include <lauxlib.h>
 #include <lualib.h>
 #include "clua.h"
-
 */
 import "C"
 import (
@@ -20,6 +19,23 @@ import (
     "sync"
     "sync/atomic"
     "unsafe"
+)
+
+const (
+    LUA_MULTRET = C.LUA_MULTRET
+)
+
+const (
+    LUA_TNONE          = int(C.LUA_TNONE)
+    LUA_TNIL           = int(C.LUA_TNIL)
+    LUA_TNUMBER        = int(C.LUA_TNUMBER)
+    LUA_TBOOLEAN       = int(C.LUA_TBOOLEAN)
+    LUA_TSTRING        = int(C.LUA_TSTRING)
+    LUA_TTABLE         = int(C.LUA_TTABLE)
+    LUA_TFUNCTION      = int(C.LUA_TFUNCTION)
+    LUA_TUSERDATA      = int(C.LUA_TUSERDATA)
+    LUA_TTHREAD        = int(C.LUA_TTHREAD)
+    LUA_TLIGHTUSERDATA = int(C.LUA_TLIGHTUSERDATA)
 )
 
 type (
@@ -37,7 +53,8 @@ type (
         registerM  sync.Mutex
         registry   map[uint32]interface{} // go object registry to uint32
         call       chan func()
-        closeCh    chan int
+        closeChan  chan struct{}
+        closeOnce  sync.Once
     }
     Error struct {
         code       int
@@ -72,7 +89,7 @@ func newState(L *C.lua_State) *State {
         registryId: 0,
         registry:   make(map[uint32]interface{}),
         call:       make(chan func()),
-        closeCh:    make(chan int),
+        closeChan:  make(chan struct{}),
     }
     registerGoState(st)
     C.c_initstate(st.s)
@@ -121,9 +138,14 @@ func NewState(L *C.lua_State) *State {
     return newState(L)
 }
 func (L *State) Close() {
-    C.lua_close(L.s)
-    unregisterGoState(L)
-    close(L.closeCh)
+    L.closeOnce.Do(func() {
+        C.lua_close(L.s)
+        unregisterGoState(L)
+        close(L.closeChan)
+    })
+}
+func (L*State) CloseChan() chan struct{} {
+    return L.closeChan
 }
 func (L *State) DoFile(filename string) error {
     if r := L.LoadFile(filename); r != 0 {
@@ -321,7 +343,9 @@ func (L *State) WaitClose() {
     defer func() {
         recover()
     }()
-    <-L.closeCh
+    select {
+    case <-L.closeChan:
+    }
 }
 
 // Is
@@ -463,9 +487,6 @@ func (L *State) RawSet(index int) {
 func (L *State) RawSeti(index int, n int) {
     C.lua_rawseti(L.s, C.int(index), C.longlong(n))
 }
-func (L *State) Pop(index int) {
-    C.lua_settop(L.s, C.int(-index-1))
-}
 
 // Table
 func (L *State) NewTable() {
@@ -478,50 +499,6 @@ func (L *State) GetField(index int, k string) {
 }
 func (L *State) SetTable(n int) {
     C.lua_settable(L.s, C.int(n))
-}
-func (L *State) GetTable(n int) {
-    C.lua_gettable(L.s, C.int(n))
-}
-func (L *State) XGetTableInt(fieldName string) (int64, bool) {
-    Cstr := C.CString(fieldName)
-    defer C.free(unsafe.Pointer(Cstr))
-    defer L.Pop(1)
-    C.lua_pushlstring(L.s, Cstr, C.size_t(len(fieldName)))
-    C.lua_gettable(L.s, C.int(-1))
-    if !L.IsNumber(-1) {
-        return 0, false
-    }
-    {
-        return int64(C.lua_tointegerx(L.s, C.int(-1), nil)), true
-    }
-}
-func (L *State) XGetTableString(fieldName string) (string, bool) {
-    Cstr := C.CString(fieldName)
-    defer C.free(unsafe.Pointer(Cstr))
-    defer L.Pop(1)
-    C.lua_pushlstring(L.s, Cstr, C.size_t(len(fieldName)))
-    C.lua_gettable(L.s, C.int(-1))
-    if !L.IsString(-1) {
-        return "", false
-    }
-    {
-        var size C.size_t
-        r := C.lua_tolstring(L.s, C.int(-1), &size)
-        return C.GoStringN(r, C.int(size)), true
-    }
-}
-func (L *State) XGetTableFloat(fieldName string) (float64, bool) {
-    Cstr := C.CString(fieldName)
-    defer C.free(unsafe.Pointer(Cstr))
-    defer L.Pop(1)
-    C.lua_pushlstring(L.s, Cstr, C.size_t(len(fieldName)))
-    C.lua_gettable(L.s, C.int(-1))
-    if !L.IsNumber(-1) {
-        return 0, false
-    }
-    {
-        return float64(C.lua_tonumberx(L.s, C.int(-1), nil)), true
-    }
 }
 
 //export g_gofunction
