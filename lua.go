@@ -1,13 +1,16 @@
 package lua
 
 /*
+#include "clua.h"
+#include "c-lib.h"
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "c-lib.h"
-#include "clua.h"
+static int xlua_gc (lua_State *L, int what, int data) {
+    return lua_gc(L, what, data);
+}
 */
 import "C"
 
@@ -463,8 +466,7 @@ func (L *State) RegisterFunction(name string, f GoFunction) {
     L.SetGlobal(name)
 }
 func (L *State) GC(what, data int) int {
-    //return int(C.lua_gc(L.s, C.int(what), C.int(data)))
-    return 0
+    return int(C.xlua_gc(L.s, C.int(what), C.int(data)))
 }
 func (L *State) GetGlobal(name string) {
     CName := C.CString(name)
