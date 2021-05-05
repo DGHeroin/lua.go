@@ -1,9 +1,9 @@
 package lua
 
 /*
-#cgo windows, -lm -lws2_32
-#cgo linux, -llua -lm
-#cgo darwin, -llua -lm
+#cgo windows,!llua LDFLAGS: -lm -lws2_32
+#cgo linux,!llua LDFLAGS: -lm
+#cgo darwin,!llua LDFLAGS: -lm
 #include "clua.h"
 #include "c-lib.h"
 #include <lua.h>
