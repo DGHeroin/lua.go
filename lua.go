@@ -41,12 +41,6 @@ const (
 
 type (
     GoFunction        func(L *State) int
-    GoFunctionContext struct {
-        L    *State
-        fun  GoFunction
-        snd  interface{}
-        name string
-    }
     State struct {
         s          *C.lua_State
         name       string
@@ -129,7 +123,11 @@ func setNamedState(name string, L *State) {
 }
 
 // Lua State
-func NewState(L *C.lua_State) *State {
+func NewState(Ls... *C.lua_State) *State {
+    var L *C.lua_State
+    if len(Ls) == 1 {
+        L = Ls[0]
+    }
     if L == nil {
         L = (C.luaL_newstate())
         if L == nil {
@@ -145,7 +143,7 @@ func (L *State) Close() {
         close(L.closeChan)
     })
 }
-func (L*State) CloseChan() chan struct{} {
+func (L *State) CloseChan() chan struct{} {
     return L.closeChan
 }
 func (L *State) DoFile(filename string) error {
@@ -204,6 +202,8 @@ func (L *State) LoadString(str string) int {
     return int(C.luaL_loadstring(L.s, Cs))
 }
 func (L *State) GetTop() int { return int(C.lua_gettop(L.s)) }
+func (L *State) SetTop(n int) { C.lua_settop(L.s, C.int(n)) }
+
 func (L *State) StackTrace() []StackEntry {
     var r []StackEntry
     var d C.lua_Debug
@@ -353,15 +353,17 @@ func (L *State) WaitClose() {
 func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsGoStruct(index int) bool   { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsBoolean(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TBOOLEAN }
-func (L *State) IsLightUserdata(index int) bool { return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA }
-func (L *State) IsNil(index int) bool       { return int(C.lua_type(L.s, C.int(index))) == LUA_TNIL }
-func (L *State) IsNone(index int) bool      { return int(C.lua_type(L.s, C.int(index))) == LUA_TNONE }
-func (L *State) IsNoneOrNil(index int) bool { return int(C.lua_type(L.s, C.int(index))) <= 0 }
-func (L *State) IsNumber(index int) bool    { return C.lua_isnumber(L.s, C.int(index)) == 1 }
-func (L *State) IsString(index int) bool    { return C.lua_isstring(L.s, C.int(index)) == 1 }
-func (L *State) IsTable(index int) bool     { return int(C.lua_type(L.s, C.int(index))) == LUA_TTABLE }
-func (L *State) IsThread(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TTHREAD }
-func (L *State) IsUserdata(index int) bool  { return C.lua_isuserdata(L.s, C.int(index)) == 1 }
+func (L *State) IsLightUserdata(index int) bool {
+    return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA
+}
+func (L *State) IsNil(index int) bool        { return int(C.lua_type(L.s, C.int(index))) == LUA_TNIL }
+func (L *State) IsNone(index int) bool       { return int(C.lua_type(L.s, C.int(index))) == LUA_TNONE }
+func (L *State) IsNoneOrNil(index int) bool  { return int(C.lua_type(L.s, C.int(index))) <= 0 }
+func (L *State) IsNumber(index int) bool     { return C.lua_isnumber(L.s, C.int(index)) == 1 }
+func (L *State) IsString(index int) bool     { return C.lua_isstring(L.s, C.int(index)) == 1 }
+func (L *State) IsTable(index int) bool      { return int(C.lua_type(L.s, C.int(index))) == LUA_TTABLE }
+func (L *State) IsThread(index int) bool     { return int(C.lua_type(L.s, C.int(index))) == LUA_TTHREAD }
+func (L *State) IsUserdata(index int) bool   { return C.lua_isuserdata(L.s, C.int(index)) == 1 }
 func (L *State) IsLuaFunction(index int) bool {
     return int(C.lua_type(L.s, C.int(index))) == LUA_TFUNCTION
 }
@@ -410,7 +412,23 @@ func (L *State) ToGoStruct(index int) (f interface{}) {
     }
     return L.registry[fid]
 }
+// lua_topointer
+func (L *State) ToPointer(index int) uintptr {
+    return uintptr(C.lua_topointer(L.s, C.int(index)))
+}
+// lua_touserdata
+func (L *State) ToUserdata(index int) unsafe.Pointer {
+    return unsafe.Pointer(C.lua_touserdata(L.s, C.int(index)))
+}
+// lua_xmove
+func XMove(from *State, to *State, n int) {
+    C.lua_xmove(from.s, to.s, C.int(n))
+}
 
+// lua_yield
+func (L *State) Yield(nresults int) int {
+    return int(C.lua_yieldk(L.s, C.int(nresults), 0, nil))
+}
 // Push
 func (L *State) PushString(str string) {
     Cstr := C.CString(str)
@@ -748,9 +766,4 @@ func g_setfield(L *C.lua_State, fid uint32, fieldName *C.char) int {
     default:
         return 0
     }
-}
-
-// GoFunctionContext
-func (f *GoFunctionContext) Invoke() {
-
 }
