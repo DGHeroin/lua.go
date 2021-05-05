@@ -205,7 +205,7 @@ func (L *State) LoadString(str string) int {
 }
 func (L *State) GetTop() int { return int(C.lua_gettop(L.s)) }
 func (L *State) StackTrace() []StackEntry {
-    r := []StackEntry{}
+    var r []StackEntry
     var d C.lua_Debug
     Sln := C.CString("Sln")
     defer C.free(unsafe.Pointer(Sln))
@@ -353,9 +353,7 @@ func (L *State) WaitClose() {
 func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsGoStruct(index int) bool   { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsBoolean(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TBOOLEAN }
-func (L *State) IsLightUserdata(index int) bool {
-    return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA
-}
+func (L *State) IsLightUserdata(index int) bool { return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA }
 func (L *State) IsNil(index int) bool       { return int(C.lua_type(L.s, C.int(index))) == LUA_TNIL }
 func (L *State) IsNone(index int) bool      { return int(C.lua_type(L.s, C.int(index))) == LUA_TNONE }
 func (L *State) IsNoneOrNil(index int) bool { return int(C.lua_type(L.s, C.int(index))) <= 0 }
@@ -578,8 +576,14 @@ func g_getfield(L *C.lua_State, fid uint32, fieldName *C.char) int {
         return 0
     }
 }
+
 func (L *State) makeFunc(sender interface{}, funcName string, value reflect.Value) GoFunction {
     return func(L *State) int {
+        defer func() {
+            if e := recover(); e != nil {
+                log.Printf("invoke [%s] error:%v\n", funcName, e)
+            }
+        }()
         t := value.Type()
         var (
             inArgs  []reflect.Value
