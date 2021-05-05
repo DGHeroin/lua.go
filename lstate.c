@@ -399,11 +399,7 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   g->gcstepsize = LUAI_GCSTEPSIZE;
   setgcparam(g->genmajormul, LUAI_GENMAJORMUL);
   g->genminormul = LUAI_GENMINORMUL;
-  // mutex
-  pthread_mutexattr_t attr;
-  pthread_mutexattr_init(&attr);
-  pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutex_init(&g->lock, &attr);
+  pthread_mutex_init(&g->lock, NULL);
   for (i=0; i < LUA_NUMTAGS; i++) g->mt[i] = NULL;
   if (luaD_rawrunprotected(L, f_luaopen, NULL) != LUA_OK) {
     /* memory allocation error: free partial state */
