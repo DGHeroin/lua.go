@@ -43,8 +43,8 @@ const (
 )
 
 type (
-    GoFunction        func(L *State) int
-    State struct {
+    GoFunction func(L *State) int
+    State      struct {
         s          *C.lua_State
         name       string
         registryId uint32
@@ -126,7 +126,7 @@ func setNamedState(name string, L *State) {
 }
 
 // Lua State
-func NewState(Ls... *C.lua_State) *State {
+func NewState(Ls ...*C.lua_State) *State {
     var L *C.lua_State
     if len(Ls) == 1 {
         L = Ls[0]
@@ -146,7 +146,7 @@ func (L *State) Close() {
         close(L.closeChan)
     })
 }
-func (L *State) CloseChan() chan struct{} {
+func (L *State) CloseChan() <-chan struct{} {
     return L.closeChan
 }
 func (L *State) DoFile(filename string) error {
@@ -189,6 +189,66 @@ func (L *State) Call(nargs int, nresults int) (err error) {
     }
     return nil
 }
+func (L *State) CallX(cbRef int, autoUnref bool, nResults int, inArgs ...interface{}) (err error) {
+    L.RawGetiX(cbRef)
+    if !L.IsLuaFunction(-1) {
+        return &Error{
+            code:       -1,
+            message:    "try invoke non function",
+            stackTrace: L.StackTrace(),
+        }
+    }
+
+    n := 0
+    for _, arg := range inArgs {
+        fval := reflect.ValueOf(arg)
+        switch fval.Kind() {
+        case reflect.Bool:
+            n++
+            L.PushBoolean(fval.Bool())
+        case reflect.String:
+            n++
+            L.PushString(fval.String())
+        case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+            n++
+            L.PushInteger(fval.Int())
+        case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+            n++
+            L.PushInteger(int64(fval.Uint()))
+        case reflect.Float32, reflect.Float64:
+            n++
+            L.PushNumber(fval.Float())
+        case reflect.Slice:
+            n++
+            L.PushBytes(fval.Bytes())
+        }
+    }
+    err = L.Call(n, nResults)
+    if autoUnref {
+        L.UnrefX(cbRef)
+    }
+    return
+}
+func (L *State) CheckStack() (result []interface{}) {
+    n := L.GetTop()
+    for idx := 1; idx <= n; idx++ {
+        luatype := L.Type(idx)
+
+        switch luatype {
+        case LUA_TNUMBER:
+            result = append(result, L.ToNumber(idx))
+        case LUA_TSTRING:
+            result = append(result, L.ToString(idx))
+        case LUA_TUSERDATA:
+            result = append(result, L.ToGoStruct(idx))
+        case LUA_TBOOLEAN:
+            result = append(result, L.ToInteger(idx) == 1)
+        case LUA_TNIL:
+            result = append(result, nil)
+        }
+    }
+    return
+}
 func (L *State) DoString(str string) error {
     if r := L.LoadString(str); r != 0 {
         return &Error{
@@ -204,7 +264,7 @@ func (L *State) LoadString(str string) int {
     defer C.free(unsafe.Pointer(Cs))
     return int(C.luaL_loadstring(L.s, Cs))
 }
-func (L *State) GetTop() int { return int(C.lua_gettop(L.s)) }
+func (L *State) GetTop() int  { return int(C.lua_gettop(L.s)) }
 func (L *State) SetTop(n int) { C.lua_settop(L.s, C.int(n)) }
 
 func (L *State) StackTrace() []StackEntry {
@@ -292,6 +352,7 @@ func (L *State) OpenLibsExt() {
     L.registerLib("serialize", C.luaopen_serialize)
     L.registerLib("cmsgpack", C.luaopen_cmsgpack)
     L.registerLib("pb", C.luaopen_pb)
+    L.registerLib("cjson", C.luaopen_cjson)
 }
 func (L *State) Ref(t int) int {
     return int(C.luaL_ref(L.s, C.int(t)))
@@ -359,14 +420,14 @@ func (L *State) IsBoolean(index int) bool    { return int(C.lua_type(L.s, C.int(
 func (L *State) IsLightUserdata(index int) bool {
     return int(C.lua_type(L.s, C.int(index))) == LUA_TLIGHTUSERDATA
 }
-func (L *State) IsNil(index int) bool        { return int(C.lua_type(L.s, C.int(index))) == LUA_TNIL }
-func (L *State) IsNone(index int) bool       { return int(C.lua_type(L.s, C.int(index))) == LUA_TNONE }
-func (L *State) IsNoneOrNil(index int) bool  { return int(C.lua_type(L.s, C.int(index))) <= 0 }
-func (L *State) IsNumber(index int) bool     { return C.lua_isnumber(L.s, C.int(index)) == 1 }
-func (L *State) IsString(index int) bool     { return C.lua_isstring(L.s, C.int(index)) == 1 }
-func (L *State) IsTable(index int) bool      { return int(C.lua_type(L.s, C.int(index))) == LUA_TTABLE }
-func (L *State) IsThread(index int) bool     { return int(C.lua_type(L.s, C.int(index))) == LUA_TTHREAD }
-func (L *State) IsUserdata(index int) bool   { return C.lua_isuserdata(L.s, C.int(index)) == 1 }
+func (L *State) IsNil(index int) bool       { return int(C.lua_type(L.s, C.int(index))) == LUA_TNIL }
+func (L *State) IsNone(index int) bool      { return int(C.lua_type(L.s, C.int(index))) == LUA_TNONE }
+func (L *State) IsNoneOrNil(index int) bool { return int(C.lua_type(L.s, C.int(index))) <= 0 }
+func (L *State) IsNumber(index int) bool    { return C.lua_isnumber(L.s, C.int(index)) == 1 }
+func (L *State) IsString(index int) bool    { return C.lua_isstring(L.s, C.int(index)) == 1 }
+func (L *State) IsTable(index int) bool     { return int(C.lua_type(L.s, C.int(index))) == LUA_TTABLE }
+func (L *State) IsThread(index int) bool    { return int(C.lua_type(L.s, C.int(index))) == LUA_TTHREAD }
+func (L *State) IsUserdata(index int) bool  { return C.lua_isuserdata(L.s, C.int(index)) == 1 }
 func (L *State) IsLuaFunction(index int) bool {
     return int(C.lua_type(L.s, C.int(index))) == LUA_TFUNCTION
 }
@@ -415,14 +476,17 @@ func (L *State) ToGoStruct(index int) (f interface{}) {
     }
     return L.registry[fid]
 }
+
 // lua_topointer
 func (L *State) ToPointer(index int) uintptr {
     return uintptr(C.lua_topointer(L.s, C.int(index)))
 }
+
 // lua_touserdata
 func (L *State) ToUserdata(index int) unsafe.Pointer {
     return unsafe.Pointer(C.lua_touserdata(L.s, C.int(index)))
 }
+
 // lua_xmove
 func XMove(from *State, to *State, n int) {
     C.lua_xmove(from.s, to.s, C.int(n))
@@ -432,6 +496,7 @@ func XMove(from *State, to *State, n int) {
 func (L *State) Yield(nresults int) int {
     return int(C.lua_yieldk(L.s, C.int(nresults), 0, nil))
 }
+
 // Push
 func (L *State) PushString(str string) {
     Cstr := C.CString(str)
@@ -621,7 +686,7 @@ func (L *State) makeFunc(sender interface{}, funcName string, value reflect.Valu
                 if luatype != LUA_TNUMBER {
                     return 0
                 }
-                inArgs = append(inArgs, reflect.ValueOf(bool(L.ToInteger(idx) == 1)))
+                inArgs = append(inArgs, reflect.ValueOf(L.ToInteger(idx) == 1))
             case reflect.String:
                 if luatype != LUA_TSTRING {
                     return 0
@@ -658,7 +723,7 @@ func (L *State) makeFunc(sender interface{}, funcName string, value reflect.Valu
                 }
                 inArgs = append(inArgs, reflect.ValueOf(L.ToBytes(idx)))
             default:
-                log.Println("参数不支持", k)
+                log.Println("参数In不支持", k)
                 return 0
             }
         }

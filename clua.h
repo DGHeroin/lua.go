@@ -6,6 +6,8 @@
 #include <lualib.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
 #include "c-lib.h"
 
 void c_initstate(lua_State* L);
