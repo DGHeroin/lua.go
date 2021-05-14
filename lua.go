@@ -547,6 +547,10 @@ func (L *State) RegisterFunction(name string, f GoFunction) {
     L.PushGoFunction(f)
     L.SetGlobal(name)
 }
+func (L *State) RegisterGoStruct(name string, obj interface{}) {
+    L.PushGoStruct(obj)
+    L.SetGlobal(name)
+}
 func (L *State) GC(what, data int) int {
     return int(C.xlua_gc(L.s, C.int(what), C.int(data)))
 }
