@@ -185,7 +185,7 @@
  *	used for input more than STRTOD_DIGLIM digits long (default 40).
  */
 
-#include "dtoa_config.h"
+#include "c-cjson-dtoa_config.h"
 
 #ifndef Long
 #define Long long

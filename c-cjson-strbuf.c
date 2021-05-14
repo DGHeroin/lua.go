@@ -27,7 +27,7 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "strbuf.h"
+#include "c-cjson-strbuf.h"
 
 static void die(const char *fmt, ...)
 {

@@ -233,13 +233,28 @@ typedef l_uint32 Instruction;
 ** macros that are executed whenever program enters the Lua core
 ** ('lua_lock') and leaves the core ('lua_unlock')
 */
-#include <pthread.h>
+
+#if USING_PTHREAD
 
 #if !defined(lua_lock)
+#include <pthread.h>
 #define lua_lock(L) pthread_mutex_lock(&(G(L)->lock));
 #define lua_unlock(L) pthread_mutex_unlock(&(G(L)->lock));
 #endif
 
+#elif CUSTOM_LUA_LOCK
+
+extern void luago_lock(void*);
+extern void luago_unlock(void*);
+#define lua_lock(L) luago_lock(L);
+#define lua_unlock(L) luago_unlock(L);
+
+#else
+
+#define lua_lock(L)
+#define lua_unlock(L)
+
+#endif
 /*
 ** macro executed during Lua functions at points where the
 ** function can yield.

@@ -4,6 +4,8 @@ package lua
 #cgo windows,!llua LDFLAGS: -lm -lws2_32
 #cgo linux,!llua LDFLAGS: -lm
 #cgo darwin,!llua LDFLAGS: -lm
+
+#cgo CFLAGS: -DCUSTOM_LUA_LOCK=1
 #include "clua.h"
 #include "c-lib.h"
 #include <lua.h>
@@ -50,9 +52,10 @@ type (
         registryId uint32
         registerM  sync.Mutex
         registry   map[uint32]interface{} // go object registry to uint32
-        call       chan func()
         closeChan  chan struct{}
         closeOnce  sync.Once
+        lock       sync.Mutex
+        gcCount    int64
     }
     Error struct {
         code       int
@@ -72,13 +75,35 @@ func (e *Error) Error() string {
 }
 
 var (
+    luaStates     map[interface{}]*State
     goStates      map[interface{}]*State
     goStatesMutex sync.Mutex
     namedStates   map[string]*State
 )
 
+//export luago_lock
+func luago_lock(ptr *C.void) {
+    goStatesMutex.Lock()
+    if L, ok := luaStates[ptr]; ok {
+        L.lock.Unlock()
+        log.Println("lock", ptr)
+    }
+    goStatesMutex.Unlock()
+
+}
+
+//export luago_unlock
+func luago_unlock(ptr *C.void) {
+    goStatesMutex.Lock()
+    if L, ok := luaStates[ptr]; ok {
+        L.lock.Unlock()
+        log.Println("unlock", ptr)
+    }
+    goStatesMutex.Unlock()
+}
 func init() {
     goStates = make(map[interface{}]*State, 16)
+    luaStates = make(map[interface{}]*State, 16)
     namedStates = make(map[string]*State, 16)
 }
 func newState(L *C.lua_State) *State {
@@ -86,13 +111,10 @@ func newState(L *C.lua_State) *State {
         s:          L,
         registryId: 0,
         registry:   make(map[uint32]interface{}),
-        call:       make(chan func()),
         closeChan:  make(chan struct{}),
     }
     registerGoState(st)
     C.c_initstate(st.s)
-    go st.callbackHandle()
-
     st.PushGoStruct(st)
     st.SetGlobal("_LuaState")
     return st
@@ -101,11 +123,13 @@ func registerGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
     goStates[L.s] = L
+    luaStates[L.s] = L
 }
 func unregisterGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
     delete(goStates, L.s)
+    delete(luaStates, L.s)
 }
 func getGoState(L *C.lua_State) *State {
     goStatesMutex.Lock()
@@ -146,7 +170,7 @@ func (L *State) Close() {
         close(L.closeChan)
     })
 }
-func (L *State) CloseChan() <-chan struct{} {
+func (L *State) CloseChan() <-chan struct{} { // expose readonly chan
     return L.closeChan
 }
 func (L *State) DoFile(filename string) error {
@@ -300,7 +324,6 @@ func (L *State) register(f interface{}) uint32 {
     if id == 0 { // 完成一次uint32
         id = atomic.AddUint32(&L.registryId, 1)
     }
-
     L.registry[id] = f
     return id
 }
@@ -320,28 +343,6 @@ func (L *State) delRegister(id uint32) interface{} {
         return p
     }
     return nil
-}
-func (L *State) callbackHandle() {
-    invoke := func(cb func()) {
-        defer func() {
-            recover()
-        }()
-        cb()
-    }
-    for {
-        select {
-        case cb := <-L.call:
-            if cb != nil {
-                invoke(cb)
-            }
-        }
-    }
-}
-func (L *State) Run(cb func()) {
-    defer func() {
-        recover()
-    }()
-    L.call <- cb
 }
 func (L *State) registerLib(name string, fn unsafe.Pointer) {
     Sln := C.CString(name)
@@ -385,20 +386,17 @@ func (L *State) SendMessage(name string, cmd int, data []byte) {
         if t == nil {
             return
         }
-        t.Run(func() {
-            t.GetGlobal("_LuaStateMessage")
-            if t.IsLuaFunction(-1) {
-                t.PushInteger(int64(cmd))
-                t.PushBytes(data)
-                if err := t.Call(2, 0); err != nil {
-                    log.Println(err)
-                }
-            } else {
-                log.Println("not func")
+        t.GetGlobal("_LuaStateMessage")
+        if t.IsLuaFunction(-1) {
+            t.PushInteger(int64(cmd))
+            t.PushBytes(data)
+            if err := t.Call(2, 0); err != nil {
+                log.Println(err)
             }
-        })
+        } else {
+            log.Println("not func")
+        }
     }()
-
 }
 func (L *State) NewThread() *State {
     nL := C.lua_newthread(L.s)
@@ -552,6 +550,14 @@ func (L *State) RegisterFunction(name string, f GoFunction) {
 func (L *State) GC(what, data int) int {
     return int(C.xlua_gc(L.s, C.int(what), C.int(data)))
 }
+func (L *State) GCCount() (int64, int64) {
+    L.registerM.Lock()
+    defer L.registerM.Unlock()
+    refNum := int64(len(L.registry))
+    gcNum := atomic.LoadInt64(&L.gcCount)
+    return refNum, gcNum
+}
+
 func (L *State) GetGlobal(name string) {
     CName := C.CString(name)
     defer C.free(unsafe.Pointer(CName))
@@ -612,6 +618,7 @@ func g_gogc(L *C.lua_State, fid uint32) int {
         return 0
     }
     L1.delRegister(fid)
+    atomic.AddInt64(&L1.gcCount, 1)
     return 0
 }
 
