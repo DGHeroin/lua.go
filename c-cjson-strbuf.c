@@ -93,10 +93,10 @@ void strbuf_set_increment(strbuf_t *s, int increment)
 
 static inline void debug_stats(strbuf_t *s)
 {
-    if (s->debug) {
-        fprintf(stderr, "strbuf(%lx) reallocs: %d, length: %d, size: %d\n",
-                (long)s, s->reallocs, s->length, s->size);
-    }
+//    if (s->debug) {
+//        fprintf(stderr, "strbuf(%lx) reallocs: %d, length: %d, size: %d\n",
+//                (long)s, s->reallocs, s->length, s->size);
+//    }
 }
 
 /* If strbuf_t has not been dynamically allocated, strbuf_free() can
@@ -167,10 +167,10 @@ void strbuf_resize(strbuf_t *s, int len)
 
     newsize = calculate_new_size(s, len);
 
-    if (s->debug > 1) {
-        fprintf(stderr, "strbuf(%lx) resize: %d => %d\n",
-                (long)s, s->size, newsize);
-    }
+//    if (s->debug > 1) {
+//        fprintf(stderr, "strbuf(%lx) resize: %d => %d\n",
+//                (long)s, s->size, newsize);
+//    }
 
     s->size = newsize;
     s->buf = realloc(s->buf, s->size);

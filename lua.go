@@ -75,35 +75,40 @@ func (e *Error) Error() string {
 }
 
 var (
-    luaStates     map[interface{}]*State
     goStates      map[interface{}]*State
     goStatesMutex sync.Mutex
     namedStates   map[string]*State
+    mutexMap      sync.Map
+    mu            sync.Mutex
 )
 
 //export luago_lock
-func luago_lock(ptr *C.void) {
-    goStatesMutex.Lock()
-    if L, ok := luaStates[ptr]; ok {
-        L.lock.Unlock()
-        log.Println("lock", ptr)
+func luago_lock(L *C.lua_State) {
+    mu.Lock()
+    m := &sync.Mutex{}
+    p, ok := mutexMap.LoadOrStore(L, m)
+    if ok {
+       m = p.(*sync.Mutex)
     }
-    goStatesMutex.Unlock()
+    mu.Unlock()
+    m.Lock()
 
 }
 
 //export luago_unlock
-func luago_unlock(ptr *C.void) {
-    goStatesMutex.Lock()
-    if L, ok := luaStates[ptr]; ok {
-        L.lock.Unlock()
-        log.Println("unlock", ptr)
+func luago_unlock(L *C.lua_State) {
+    mu.Lock()
+    m := &sync.Mutex{}
+    p, ok := mutexMap.LoadOrStore(L, m)
+    if ok {
+        m = p.(*sync.Mutex)
     }
-    goStatesMutex.Unlock()
+    mu.Unlock()
+    m.Unlock()
+
 }
 func init() {
     goStates = make(map[interface{}]*State, 16)
-    luaStates = make(map[interface{}]*State, 16)
     namedStates = make(map[string]*State, 16)
 }
 func newState(L *C.lua_State) *State {
@@ -123,13 +128,12 @@ func registerGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
     goStates[L.s] = L
-    luaStates[L.s] = L
 }
 func unregisterGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
     delete(goStates, L.s)
-    delete(luaStates, L.s)
+    mutexMap.Delete(L.s)
 }
 func getGoState(L *C.lua_State) *State {
     goStatesMutex.Lock()
@@ -245,6 +249,13 @@ func (L *State) CallX(cbRef int, autoUnref bool, nResults int, inArgs ...interfa
         case reflect.Slice:
             n++
             L.PushBytes(fval.Bytes())
+        case reflect.Ptr, reflect.Interface:
+            n++
+            if arg == nil {
+                L.PushNil()
+            } else {
+                L.PushGoStruct(arg)
+            }
         }
     }
     err = L.Call(n, nResults)
