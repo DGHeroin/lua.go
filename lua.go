@@ -5,7 +5,8 @@ package lua
 #cgo linux,!llua LDFLAGS: -lm
 #cgo darwin,!llua LDFLAGS: -lm
 
-#cgo CFLAGS: -DCUSTOM_LUA_LOCK=1
+//#cgo CFLAGS: -DUSING_PTHREAD=1
+#cgo CFLAGS: -DCUSTOM_LUA_LOCK=0
 #include "clua.h"
 #include "c-lib.h"
 #include <lua.h>
@@ -78,35 +79,12 @@ var (
     goStates      map[interface{}]*State
     goStatesMutex sync.Mutex
     namedStates   map[string]*State
-    mutexMap      sync.Map
-    mu            sync.Mutex
 )
 
 //export luago_lock
-func luago_lock(L *C.lua_State) {
-    mu.Lock()
-    m := &sync.Mutex{}
-    p, ok := mutexMap.LoadOrStore(L, m)
-    if ok {
-       m = p.(*sync.Mutex)
-    }
-    mu.Unlock()
-    m.Lock()
-
-}
-
+func luago_lock(L *C.lua_State) {}
 //export luago_unlock
-func luago_unlock(L *C.lua_State) {
-    mu.Lock()
-    m := &sync.Mutex{}
-    p, ok := mutexMap.LoadOrStore(L, m)
-    if ok {
-        m = p.(*sync.Mutex)
-    }
-    mu.Unlock()
-    m.Unlock()
-
-}
+func luago_unlock(L *C.lua_State) {}
 func init() {
     goStates = make(map[interface{}]*State, 16)
     namedStates = make(map[string]*State, 16)
@@ -133,7 +111,6 @@ func unregisterGoState(L *State) {
     goStatesMutex.Lock()
     defer goStatesMutex.Unlock()
     delete(goStates, L.s)
-    mutexMap.Delete(L.s)
 }
 func getGoState(L *C.lua_State) *State {
     goStatesMutex.Lock()
@@ -301,7 +278,6 @@ func (L *State) LoadString(str string) int {
 }
 func (L *State) GetTop() int  { return int(C.lua_gettop(L.s)) }
 func (L *State) SetTop(n int) { C.lua_settop(L.s, C.int(n)) }
-
 func (L *State) StackTrace() []StackEntry {
     var r []StackEntry
     var d C.lua_Debug
@@ -421,7 +397,12 @@ func (L *State) WaitClose() {
     case <-L.closeChan:
     }
 }
-
+func (L *State) Lock()  {
+    L.lock.Lock()
+}
+func (L *State) Unlock()  {
+    L.lock.Unlock()
+}
 // Is
 func (L *State) IsGoFunction(index int) bool { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
 func (L *State) IsGoStruct(index int) bool   { return C.c_is_gostruct(L.s, C.int(index)) != 0 }
