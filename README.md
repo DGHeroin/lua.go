@@ -10,7 +10,10 @@
    
    · 支持直接调用 Go struct 的函数
 3. 内建 protobuf/msgpack/cjson/serialize 4种序列化库(需调用OpenLibsExt())
-~~4. 已适配 lua_lock/lua_unlock 支持goroutine并发, 无需额外加锁 (误)
+
+**_非常_ 重要**
+
+1. goroutine并发, 需额外加锁!!
 
 #### 关于性能
 以我的iMac为例
