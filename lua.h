@@ -329,6 +329,7 @@ LUA_API void (lua_warning)  (lua_State *L, const char *msg, int tocont);
 #define LUA_GCINC		11
 
 LUA_API int (lua_gc) (lua_State *L, int what, ...);
+//LUA_API int (lua_gc) (lua_State *L, int what, int data);
 
 
 /*

@@ -1,6 +1,6 @@
-require "cmsgpack"
-require "serialize"
-require "pb"
+--require "cmsgpack"
+--require "serialize"
+--require "pb"
 
 function Say(name)
     print('my name is...', name)
@@ -26,9 +26,10 @@ end
 --Dog = nil
 --Dog2 = nil
 
-Dog.Say('aaa', 1234)
-Dog.Say('aaa', 1234)
+--Dog.Say('aaa', 1234)
+--Dog.Say('aaa', 1234)
 
 collectgarbage("collect") -- gc 'Dog'
 
-Dog.Say('aaa', 1234)
+--Dog.Say('aaa', 1234)
+myfunc()

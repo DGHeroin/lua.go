@@ -3,15 +3,13 @@ package main
 import (
     "github.com/DGHeroin/lua.go"
     "log"
-    "runtime"
-    "runtime/debug"
-    "time"
 )
 
 type Dog struct {
     Name string
     Age  int
 }
+
 func (d *Dog) Say(name string, age int) (string, string, int) {
     log.Println("dog say in go", d.Name, name, age)
     return "kiss", d.Name, d.Age
@@ -26,33 +24,38 @@ func (d *Dog) Tell(p *Dog) interface{} {
 }
 func main() {
     log.SetFlags(log.LstdFlags | log.Llongfile)
-    L := lua.NewState(nil)
+    L := lua.NewState()
     L.OpenLibs()
-    L.OpenLibsExt()
+    // L.OpenLibsExt()
 
-    L.RegisterFunction("GGFunc", func(L *lua.State) int {
-       log.Println("call GG.......")
-       return 0
-    })
-    L.RegisterFunction("fgc", func(L *lua.State) int {
-       runtime.GC()
-       debug.FreeOSMemory()
-       return 0
-    })
-    L.RegisterFunction("sleep", func(L *lua.State) int {
-       dur := time.Duration(float64(time.Second) * L.ToNumber(-1))
-       if dur == 0 {
-           dur.Nanoseconds()
-       }
-       time.Sleep(dur)
-       return 0
-    })
+    // L.RegisterFunction("GGFunc", func(L *lua.State) int {
+    //     log.Println("call GG.......")
+    //     return 0
+    // })
+    // L.RegisterFunction("fgc", func(L *lua.State) int {
+    //     runtime.GC()
+    //     debug.FreeOSMemory()
+    //     return 0
+    // })
+    // L.RegisterFunction("sleep", func(L *lua.State) int {
+    //     dur := time.Duration(float64(time.Second) * L.ToNumber(-1))
+    //     if dur == 0 {
+    //         dur.Nanoseconds()
+    //     }
+    //     time.Sleep(dur)
+    //     return 0
+    // })
 
     L.PushGoStruct(&Dog{Name: "我是狗1"})
     L.SetGlobal("Dog")
 
     L.PushGoStruct(&Dog{Name: "我是狗2"})
     L.SetGlobal("Dog2")
+
+    L.Register("myfunc", func(L *lua.State) int {
+        log.Println("调用:", L.GetTop())
+        return 0
+    })
 
     //   if err := L.DoString(`
     //   function Say(name)
@@ -67,7 +70,7 @@ func main() {
     //   print("after:", Dog.Name, Dog.Age)
     //   print(Dog.Say('aaa', 1234))
     //   print(Dog2.Say('bbb', 1234))
-    //`); err != nil {
+    // `); err != nil {
     //       log.Println(err)
     //   }
 
