@@ -47,6 +47,5 @@ int clua_isgofunction(lua_State *L, int n);
 int clua_isgostruct(lua_State *L, int n);
 // ext libs
 void clua_register_lib(lua_State* L, void* func, const char* name);
-int luaopen_serialize(lua_State *L);
 
 #endif

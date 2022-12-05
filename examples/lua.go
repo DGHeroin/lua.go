@@ -23,7 +23,7 @@ func (d *Dog) Tell(p *Dog) interface{} {
     return d
 }
 func main() {
-    log.SetFlags(log.LstdFlags | log.Llongfile)
+    // log.SetFlags(log.LstdFlags | log.Llongfile)
     L := lua.NewState()
     L.OpenLibs()
     // L.OpenLibsExt()

@@ -649,7 +649,7 @@ func (L *State) OpenOS() {
 
 // register lib form golang side
 func (L *State) OpenGoLibs() {
-    L.registerLib("serialize", C.luaopen_serialize)
+
 }
 
 func (L *State) registerLib(name string, fn unsafe.Pointer) {
