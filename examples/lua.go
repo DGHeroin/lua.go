@@ -26,6 +26,13 @@ func main() {
     // log.SetFlags(log.LstdFlags | log.Llongfile)
     L := lua.NewState()
     L.OpenLibs()
+    L.OpenLibsExt()
+    err := L.DoString(`
+require('cjson')
+`)
+    if err != nil {
+        panic(err)
+    }
     // L.OpenLibsExt()
 
     // L.RegisterFunction("GGFunc", func(L *lua.State) int {

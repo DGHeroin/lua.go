@@ -48,4 +48,8 @@ int clua_isgostruct(lua_State *L, int n);
 // ext libs
 void clua_register_lib(lua_State* L, void* func, const char* name);
 
+int luaopen_cmsgpack(lua_State *L);
+int luaopen_pb(lua_State *L);
+int luaopen_cjson(lua_State *L);
+
 #endif

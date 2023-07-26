@@ -651,7 +651,12 @@ func (L *State) OpenOS() {
 func (L *State) OpenGoLibs() {
 
 }
-
+func (L *State) OpenLibsExt() {
+    //L.registerLib("serialize", C.luaopen_serialize)
+    L.registerLib("cmsgpack", C.luaopen_cmsgpack)
+    L.registerLib("pb", C.luaopen_pb)
+    L.registerLib("cjson", C.luaopen_cjson)
+}
 func (L *State) registerLib(name string, fn unsafe.Pointer) {
     Sln := C.CString(name)
     defer C.free(unsafe.Pointer(Sln))
